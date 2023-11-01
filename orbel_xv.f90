@@ -168,18 +168,103 @@ end subroutine
 ! *********************************************************************
 ! Input:
 !     gmsum  ==>  G*(M1+M2)
-!     x,y,z,vx,vy,vz  ==> Cartesian position and velovity
-! Output:
 !     a  ==>  semimajor axis
 !     e  ==>  orbital eccentricity
 !     inc  ==>  orbital inclination
 !     capom  ==> longitude of ascending node (rad)
 !     omega  ==> argument of pericenter (rad)
 !     capm   ==> orbital mean anomaly (rad)
+! Output:
+!     x,y,z,vx,vy,vz ==> cartesian positions and velocities
 ! *********************************************************************
 ! Date written:
 !     2023.10.31 by Miao Yuxuan
 !     Revision from M. Duncan 
+subroutine orbel_el2xv(gmsum,a,e,inc,capom,omega,capm,x,y,z,vx,vy,vz)
+    implicit none 
+    ! Input/Output param
+    real*8  gmsum,a,e,inc,capom,omega,capm 
+    real*8  x,y,z,vx,vy,vz 
+    ! Local param
+    real*8  orbel_ehybrid,orbel_fhybrid,orbel_zget
+    integer ialpha
+    real*8  TINY 
+    real*8  em1,sp,cp,so,co,si,ci
+    real*8  cape,scap,ccap,sqe,sqgma
+    real*8  capf,shcap,chcap,zpara
+    real*8  d11,d12,d13,d21,d22,d23
+    real*8  xfac1,xfac2,vfac1,vfac2,ri
+    parameter(TINY = 4.d-15)
+    ! ... Execution ...
+    ! Check whether eccentricity e < 0
+    if(e.lt.0.d0) then 
+        write(6,"(a)") "ORBEL_EL2XV : ERROE FOR ECC < 0, SETTING ECC = 0!"
+        e = 0.d0 
+    endif
+    ! Check for the type of conic section
+    em1 = e - 1.d0
+    if(abs(em1).lt.TINY) ialpha = 0
+    if(em1.gt.TINY) ialpha = +1
+    if(em1.lt.-TINY) ialpha = -1
+    ! Generate rotation matrices
+    sp = sin(omega)
+    cp = cos(omega)
+    so = sin(capom)
+    co = cos(capom)
+    si = sin(inc)
+    ci = cos(inc)
+    d11 = cp*co - sp*so*ci
+	d12 = cp*so + sp*co*ci
+	d13 = sp*si
+	d21 = -sp*co - cp*so*ci
+	d22 = -sp*so + cp*co*ci
+	d23 = cp*si
+    ! Get the other quantities depending on the type of orbital type (ialpha)
+    ! Elliptic orbits
+    if(ialpha.eq.-1) then 
+        cape = orbel_ehybrid(e,capm) ! Mean anomaly is normalized to [0,2pi]
+        scap = sin(cape)
+        ccap = cos(cape)
+        sqe = sqrt(1.d0 - e*e)
+        sqgma = sqrt(gmsum*a)
+        xfac1 = a*(ccap - e)
+        xfac2 = a*sqe*scap 
+        ri = 1.d0 / (a*(1.d0 - e*ccap))
+        vfac1 = -ri * sqgma * scap 
+        vfac2 =  ri * sqgma * sqe * ccap 
+    endif
+    ! Hyperbolic orbits
+    if(ialpha.eq.+1) then 
+        capf = orbel_fhybrid(e,capm)
+        shcap = sinh(capf)
+        chcap = cosh(capf)
+        sqe = sqrt(e*e - 1.d0)
+        sqgma = sqrt(gmsum*a)
+        xfac1 = a*(e - chcap)
+        xfac2 = a*sqe*shcap 
+        ri = 1.d0 / (a*(e*chcap - 1.d0))
+        vfac1 = -ri * sqgma * shcap
+	    vfac2 =  ri * sqgma * sqe * chcap
+    endif
+    ! Parabolic orbits
+    if(ialpha.eq.0) then 
+        zpara = orbel_zget(capm)
+        sqgma = sqrt(2.d0*gmsum*a)
+        xfac1 = a*(1.d0 - zpara*zpara)
+        xfac2 = 2.d0*a*zpara 
+        ri = 1.d0 / (a*(1.d0 + zpara*zpara))
+        vfac1 = -ri * sqgma * zpara
+        vfac2 =  ri * sqgma
+    endif
+
+    x =  d11*xfac1 + d21*xfac2
+	y =  d12*xfac1 + d22*xfac2
+	z =  d13*xfac1 + d23*xfac2
+	vx = d11*vfac1 + d21*vfac2
+	vy = d12*vfac1 + d22*vfac2
+	vz = d13*vfac1 + d23*vfac2
+    return
+end subroutine
 
 ! *********************************************************************
 ! orbel_esolmd.f90 (function)
@@ -400,7 +485,7 @@ function orbel_ehybrid(e,capm)
     parameter(TWOPI = 2.d0 * PI)
     ! ... Execution ...
     ! Normalization
-    capm = capm - int(capm/TWOPI) * TWOPI 
+    capm = capm - int(capm/TWOPI) * TWOPI
     if(capm.lt.0.d0) capm = capm + TWOPI 
     ! Check the value of eccectricity
     if(e.lt.0.18d0) then 
@@ -410,7 +495,6 @@ function orbel_ehybrid(e,capm)
     else 
         orbel_ehybrid = orbel_ehie(e,capm)
     endif
-    return
 end function
 
 ! *********************************************************************
@@ -568,7 +652,7 @@ function orbel_fget(e,capn)
         ! Continue to iterate
         x = orbel_fget
     enddo
-    write(6,*) "ORBEL_FGET : RETURNING WITHOUT COMPLETE CONVERGENCE!"
+    write(6,"(a)") "ORBEL_FGET : RETURNING WITHOUT COMPLETE CONVERGENCE!"
     return
 end function
 
